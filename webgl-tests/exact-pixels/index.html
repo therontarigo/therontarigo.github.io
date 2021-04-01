@@ -1,0 +1,133 @@
+<!doctype html>
+<html>
+<head>
+<title>Exact Pixel Display</title>
+<meta charset="utf-8"/>
+</head>
+<body>
+<div id="display-layout">
+<canvas id="display"></canvas>
+</div>
+<style>
+#display-layout {
+  width: 800px;
+  height: 450px;
+  padding: 0;
+}
+#display {
+  margin: 0;
+  /*
+    image-rendering here only controls what happens once the attempt to match
+    canvas pixels to browser's native pixels has failed.
+    Otherwise (the normal case) it has no effect (not needed).
+    "pixelated" and "optimizeSpeed" control the same thing, but some
+    browsers/versions only understand one or the other.
+  */
+  image-rendering: pixelated;
+  image-rendering: optimizeSpeed;
+}
+</style>
+<script id="shader_image" type="x-shader/x-fragment">
+precision highp int;
+precision highp float;
+uniform vec3 iResolution;
+out vec4 outColor;
+void main() {
+  vec2 fc = gl_FragCoord.xy;
+  vec2 R = iResolution.xy;
+  vec2 uv = (2.*fc-R)/R.y;
+  ivec2 i = ivec2(gl_FragCoord.xy);
+  vec3 col = vec3((i.x+i.y)%2);
+  col = mix(col,vec3(.5),clamp(.5-(length(uv)-.5)*R.y/4.,0.,1.));
+  if (i.x==0||i.y==0||i.x==int(R.x)-1||i.y==int(R.y)-1) col.g=0.;
+  outColor = vec4(pow(col,vec3(1./2.2)),1.);
+}
+</script>
+<script>
+
+function init(ctx) {
+  let gl=ctx.gl;
+  let versionheader="#version 300 es\n";
+  let vertex_src=versionheader+"void main(){gl_Position="+
+    "vec4(vec2[](vec2(-3,-1),vec2(3,-1),vec2(0,2))[gl_VertexID%3],0,1);}";
+  let image_src=
+    versionheader+document.getElementById("shader_image").innerText;
+  let vert_shd=gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vert_shd,vertex_src);
+  gl.compileShader(vert_shd);
+  if (!gl.getShaderParameter(vert_shd,gl.COMPILE_STATUS)) {
+    alert(gl.getShaderInfoLog(vert_shd)); return;
+  }
+  let img_shd=gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(img_shd,image_src);
+  gl.compileShader(img_shd);
+  if (!gl.getShaderParameter(img_shd,gl.COMPILE_STATUS)) {
+    alert(gl.getShaderInfoLog(img_shd)); return;
+  }
+  let img_pgm=gl.createProgram();
+  gl.attachShader(img_pgm,vert_shd);
+  gl.attachShader(img_pgm,img_shd);
+  gl.linkProgram(img_pgm);
+  ctx.program=img_pgm;
+  ctx.uniformlocs.iResolution=gl.getUniformLocation(ctx.program,"iResolution");
+}
+
+function redraw(ctx) {
+  let gl=ctx.gl;
+  gl.useProgram(ctx.program);
+  gl.uniform3f(ctx.uniformlocs.iResolution,
+    ctx.displaysize.x,ctx.displaysize.y,0);
+  gl.viewport(0,0,ctx.displaysize.x,ctx.displaysize.y);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+
+function recalcsize(ctx) {
+  /*
+    Here's the important part.
+    vx, vy - target size of the canvas in page (CSS) pixels.
+    x, y - actual size of the rendered canvas in opengl and display pixels.
+  */
+  let layoutdiv=document.getElementById("display-layout");
+  let s=window.devicePixelRatio;
+  let vx=layoutdiv.clientWidth;
+  let vy=layoutdiv.clientHeight;
+  let x=Math.round(s*vx);
+  let y=Math.round(s*vy);
+  ctx.displaysize={x:x,y:y};
+  ctx.canvas.width=x;
+  ctx.canvas.height=y;
+  ctx.canvas.style.width=String(x/s)+"px";
+  ctx.canvas.style.height=String(y/s)+"px";
+}
+
+function main() {
+  let ctx={
+    gl:null,
+    program:null,
+    displaysize:{x:0,y:0},
+    canvas:null,
+    uniformlocs:{},
+  };
+  window.gctx = ctx;
+  ctx.canvas=document.getElementById("display");
+  ctx.gl=ctx.canvas.getContext("webgl2")||
+         ctx.canvas.getContext("experimental-webgl2");
+  if (!ctx.gl) {
+    alert("No webgl2"); return;
+  }
+  init(ctx);
+  recalcsize(ctx);
+  redraw(ctx);
+  /*
+    This does catch zoom changes on desktop browsers.
+  */
+  window.addEventListener("resize",function(){
+    recalcsize(ctx);
+    redraw(ctx);
+  });
+}
+
+main();
+
+</script>
+</body>
