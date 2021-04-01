@@ -31,7 +31,7 @@
 precision highp int;
 precision highp float;
 uniform vec3 iResolution;
-out vec4 outColor;
+layout(location=0) out vec4 outColor;
 void main() {
   vec2 fc = gl_FragCoord.xy;
   vec2 R = iResolution.xy;
@@ -48,8 +48,9 @@ void main() {
 function init(ctx) {
   let gl=ctx.gl;
   let versionheader="#version 300 es\n";
-  let vertex_src=versionheader+"void main(){gl_Position="+
-    "vec4(vec2[](vec2(-3,-1),vec2(3,-1),vec2(0,2))[gl_VertexID%3],0,1);}";
+  let vertex_src=versionheader+
+    "const vec2[3]t=vec2[](vec2(-3,-1),vec2(3,-1),vec2(0,2));"+
+    "void main(){gl_Position=vec4(t[gl_VertexID%3],0,1);}";
   let image_src=
     versionheader+document.getElementById("shader_image").innerText;
   let vert_shd=gl.createShader(gl.VERTEX_SHADER);
@@ -110,8 +111,11 @@ function main() {
   };
   window.gctx = ctx;
   ctx.canvas=document.getElementById("display");
-  ctx.gl=ctx.canvas.getContext("webgl2")||
-         ctx.canvas.getContext("experimental-webgl2");
+  let flags={
+    alpha:false,
+  };
+  ctx.gl=ctx.canvas.getContext("webgl2",flags)||
+         ctx.canvas.getContext("experimental-webgl2",flags);
   if (!ctx.gl) {
     alert("No webgl2"); return;
   }
