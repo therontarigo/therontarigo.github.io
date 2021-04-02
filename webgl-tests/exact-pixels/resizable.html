@@ -1,0 +1,226 @@
+<!doctype html>
+<html>
+<head>
+<title>Exact Pixel Display</title>
+<meta charset="utf-8"/>
+</head>
+<body>
+<div id="display-layout" style="display:inline-block;">
+<canvas id="display"></canvas>
+</div>
+
+  <!-- The following is strictly for debug/reference functionality. -->
+    <div id="measure-height" class="measure vert"></div>
+    <div id="measure-width" class="measure horz"></div>
+    <style>
+    .measure {
+      position:absolute;
+      color:#FFF;
+      font-family:sans-serif;
+      text-align:center;
+      background: linear-gradient(#999,#999) no-repeat center/
+        calc(100% - 0px) 1px;
+      background-color:#000;
+      line-height: 1.4;
+      overflow:hidden;
+    }
+    .measure.vert {
+      writing-mode:vertical-rl;
+      transform:rotate(180deg);
+      background: linear-gradient(#999,#999) no-repeat center/
+        1px calc(100% - 0px);
+      background-color:#000;
+    }
+    .measure span {white-space:nowrap;background-color:#000;}
+    </style>
+    <script>
+      function dbg_update(canvsize,elemsize) {
+        let display = document.getElementById("display-layout");
+        let widthbar = document.getElementById("measure-width");
+        let heightbar = document.getElementById("measure-height");
+        widthbar.innerHTML=
+          "<span>Canvas: "+canvsize.x+" pixels,</span> "+
+          "<span>Element: "+elemsize.x+" (CSS units)</span>";
+        heightbar.innerHTML=
+          "<span>Canvas: "+canvsize.y+" pixels,</span> "+
+          "<span>Element: "+elemsize.y+" (CSS units)</span>";
+        widthbar.style.width=elemsize.x;
+        heightbar.style.height=elemsize.y;
+        widthbar.style.top=
+          (display.offsetTop+display.clientTop+display.clientHeight+4)+"px";
+        widthbar.style.left=
+          (display.offsetLeft+display.clientLeft)+"px";
+        heightbar.style.top=
+          (display.offsetTop+display.clientTop)+"px";
+        heightbar.style.left=
+          (display.offsetLeft+display.clientLeft+display.clientWidth+4)+"px";
+      }
+    </script>
+  <!-- End of debug parts -->
+
+<style>
+
+#display-layout {
+  width: 800px;
+  height: 450px;
+  padding: 0;
+}
+
+#display-layout { resize:both;overflow:hidden; }
+
+#display {
+  margin: 0;
+  /*
+    image-rendering here only controls what happens once the attempt to match
+    canvas pixels to browser's native pixels has failed.
+    Otherwise (the normal case) it has no effect (not needed).
+    "pixelated" and "optimizeSpeed" control the same thing, but some
+    browsers/versions only understand one or the other.
+  */
+  image-rendering: pixelated;
+  image-rendering: optimizeSpeed;
+}
+</style>
+<script id="shader_image" type="x-shader/x-fragment">
+precision highp int;
+precision highp float;
+uniform vec3 iResolution;
+uniform vec2 iDisplayDPI;
+layout(location=0) out vec4 outColor;
+float threshold(float x, float xu, float r) {
+  r=max(1.,r);
+  vec2 d=vec2(dFdx(xu),dFdy(xu));
+  return clamp(.5+x/length(d)/r,0.,1.);
+}
+float threshold(float x, float r) { return threshold(x,x,r); }
+void main() {
+  vec2 fc = gl_FragCoord.xy;
+  vec2 R = iResolution.xy;
+  vec2 uv = (2.*fc-R)/R.y;
+  ivec2 i = ivec2(gl_FragCoord.xy);
+  vec3 col = vec3((i.x+i.y)%2);
+  col = mix(col,vec3(.5),threshold(.5-length(uv),4.));
+  { // resize handle
+    vec2 uvc2 = vec2(R.x-fc.x,fc.y)/iDisplayDPI;
+    if (i.x==0||i.y==0||i.x==int(R.x)-1||i.y==int(R.y)-1) col.g=0.;
+    col = mix(col,
+      mix(vec3(1.),vec3(.1),threshold(
+        -.25+abs(-.5+fract(((uvc2.x+uvc2.y)*96.+1.)/5.)),
+                          ( (uvc2.x+uvc2.y)*96.    /5.),
+        1.)),
+      threshold(.176-(uvc2.x+uvc2.y),1.));
+  }
+  outColor = vec4(pow(col,vec3(1./2.2)),1.);
+}
+</script>
+<script>
+
+function init(ctx) {
+  let gl=ctx.gl;
+  let versionheader="#version 300 es\n";
+  let vertex_src=versionheader+
+    "const vec2[3]t=vec2[](vec2(-3,-1),vec2(3,-1),vec2(0,2));"+
+    "void main(){gl_Position=vec4(t[gl_VertexID%3],0,1);}";
+  let image_src=
+    versionheader+document.getElementById("shader_image").innerText;
+  let vert_shd=gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vert_shd,vertex_src);
+  gl.compileShader(vert_shd);
+  if (!gl.getShaderParameter(vert_shd,gl.COMPILE_STATUS)) {
+    alert(gl.getShaderInfoLog(vert_shd)); return;
+  }
+  let img_shd=gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(img_shd,image_src);
+  gl.compileShader(img_shd);
+  if (!gl.getShaderParameter(img_shd,gl.COMPILE_STATUS)) {
+    alert(gl.getShaderInfoLog(img_shd)); return;
+  }
+  let img_pgm=gl.createProgram();
+  gl.attachShader(img_pgm,vert_shd);
+  gl.attachShader(img_pgm,img_shd);
+  gl.linkProgram(img_pgm);
+  ctx.program=img_pgm;
+  ctx.uniformlocs.iResolution=gl.getUniformLocation(ctx.program,"iResolution");
+  ctx.uniformlocs.iDisplayDPI=gl.getUniformLocation(ctx.program,"iDisplayDPI");
+}
+
+function redraw(ctx) {
+  let gl=ctx.gl;
+  gl.useProgram(ctx.program);
+  gl.uniform3f(ctx.uniformlocs.iResolution,
+    ctx.displaysize.x,ctx.displaysize.y,0);
+  gl.uniform2f(ctx.uniformlocs.iDisplayDPI,
+    ctx.displaydpi.x,ctx.displaydpi.y);
+  gl.viewport(0,0,ctx.displaysize.x,ctx.displaysize.y);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+
+function recalcsize(ctx) {
+  /*
+    Here's the important part.
+    vx, vy - target size of the canvas in page (CSS) pixels.
+    x, y - actual size of the rendered canvas in opengl and display pixels.
+  */
+  let layoutdiv=document.getElementById("display-layout");
+  let s=window.devicePixelRatio;
+  let vx=layoutdiv.clientWidth;
+  let vy=layoutdiv.clientHeight;
+  let x=Math.round(s*vx);
+  let y=Math.round(s*vy);
+  ctx.displaysize={x:x,y:y};
+  ctx.displaydpi={x:96.*s,y:96.*s};
+  ctx.canvas.width=x;
+  ctx.canvas.height=y;
+  ctx.canvas.style.width=String(x/s)+"px";
+  ctx.canvas.style.height=String(y/s)+"px";
+  (typeof dbg_update==="function") && dbg_update(
+    {x:ctx.canvas.width,y:ctx.canvas.height},
+    {x:ctx.canvas.style.width,y:ctx.canvas.style.height});
+}
+
+function main() {
+  let ctx={
+    gl:null,
+    program:null,
+    displaysize:{x:0,y:0},
+    displaydpi:{x:0,y:0},
+    canvas:null,
+    uniformlocs:{},
+  };
+  window.gctx = ctx;
+  ctx.canvas=document.getElementById("display");
+  let flags={
+    alpha:false,
+  };
+  ctx.gl=ctx.canvas.getContext("webgl2",flags)||
+         ctx.canvas.getContext("experimental-webgl2",flags);
+  if (!ctx.gl) {
+    alert("No webgl2"); return;
+  }
+  init(ctx);
+  recalcsize(ctx);
+  redraw(ctx);
+  /*
+    This does catch zoom changes on desktop browsers.
+  */
+  window.addEventListener("resize",function(){
+    recalcsize(ctx);
+    redraw(ctx);
+  });
+  {
+    let lock=false;
+    (new MutationObserver(function(){
+      if (!lock) {
+	lock=true;
+        recalcsize(ctx);
+        redraw(ctx);
+	setTimeout(function(){lock=false;},0);
+      }
+      })).observe(document.getElementById("display-layout"),{attributes:true});
+  }
+}
+
+main();
+
+</script>
+</body>
